@@ -1,0 +1,9 @@
+{
+  "name": "SwarmAI Personal Assistant",
+  "short_name": "SwarmAI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#2563eb",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

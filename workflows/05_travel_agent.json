@@ -1,0 +1,112 @@
+{
+  "id": "SwarmTravel00001",
+  "name": "SwarmAI - Travel Agent",
+  "active": false,
+  "settings": { "executionOrder": "v1", "callerPolicy": "workflowsFromSameOwner" },
+  "nodes": [
+    {
+      "id": "d0000001-0000-4000-8000-000000000001",
+      "name": "When Called by Master",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "parameters": {
+        "workflowInputs": { "values": [{ "name": "query" }, { "name": "sessionId" }] }
+      }
+    },
+    {
+      "id": "d0000001-0000-4000-8000-000000000002",
+      "name": "Travel Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [260, 0],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "options": {
+          "systemMessage": "=You are the TRAVEL AGENT of a personal assistant. Current date: {{ $now.toISODate() }}.\n\nYou search real flights and hotels via Google Flights / Google Hotels (SerpAPI) and compare them.\n\nRules:\n- Convert city names to the main airport IATA code (e.g. Hyderabad -> HYD, New York -> JFK, London -> LHR) for flights.\n- Dates must be YYYY-MM-DD and in the future. Resolve relative dates from the current date.\n- If origin, destination or dates are missing, say exactly what is missing instead of guessing.\n- Use the currency the user mentions; default INR.\n- Present the top 3-5 options as a compact comparison: airline / hotel name, price, duration or rating, stops, key times. Then recommend the best value option and why.\n- You only search and compare. You cannot book; say so if asked."
+        }
+      }
+    },
+    {
+      "id": "d0000001-0000-4000-8000-000000000003",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [80, 240],
+      "parameters": {
+        "model": { "__rl": true, "mode": "list", "value": "gpt-4o-mini" },
+        "options": { "temperature": 0.2 }
+      }
+    },
+    {
+      "id": "d0000001-0000-4000-8000-000000000004",
+      "name": "Search Flights",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [300, 240],
+      "parameters": {
+        "toolDescription": "Search Google Flights. type=1 round trip (needs return_date), type=2 one way (leave return_date empty).",
+        "method": "GET",
+        "url": "https://serpapi.com/search.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            { "name": "engine", "value": "google_flights" },
+            { "name": "departure_id", "value": "={{ $fromAI('departure_id', 'Origin airport IATA code, e.g. HYD', 'string') }}" },
+            { "name": "arrival_id", "value": "={{ $fromAI('arrival_id', 'Destination airport IATA code, e.g. BOM', 'string') }}" },
+            { "name": "outbound_date", "value": "={{ $fromAI('outbound_date', 'Departure date YYYY-MM-DD', 'string') }}" },
+            { "name": "return_date", "value": "={{ $fromAI('return_date', 'Return date YYYY-MM-DD, empty for one way', 'string') }}" },
+            { "name": "type", "value": "={{ $fromAI('trip_type', '1 = round trip, 2 = one way', 'number', 2) }}" },
+            { "name": "currency", "value": "={{ $fromAI('currency', 'ISO currency code, e.g. INR, USD', 'string', 'INR') }}" },
+            { "name": "adults", "value": "={{ $fromAI('adults', 'Number of adult passengers', 'number', 1) }}" },
+            { "name": "hl", "value": "en" }
+          ]
+        },
+        "optimizeResponse": true,
+        "dataField": "best_flights",
+        "options": {}
+      }
+    },
+    {
+      "id": "d0000001-0000-4000-8000-000000000005",
+      "name": "Search Hotels",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [500, 240],
+      "parameters": {
+        "toolDescription": "Search Google Hotels for a location and stay dates. Returns names, prices, ratings, amenities.",
+        "method": "GET",
+        "url": "https://serpapi.com/search.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            { "name": "engine", "value": "google_hotels" },
+            { "name": "q", "value": "={{ $fromAI('query', 'Search text, e.g. hotels near Baga Beach Goa', 'string') }}" },
+            { "name": "check_in_date", "value": "={{ $fromAI('check_in_date', 'Check-in YYYY-MM-DD', 'string') }}" },
+            { "name": "check_out_date", "value": "={{ $fromAI('check_out_date', 'Check-out YYYY-MM-DD', 'string') }}" },
+            { "name": "adults", "value": "={{ $fromAI('adults', 'Number of adult guests', 'number', 2) }}" },
+            { "name": "currency", "value": "={{ $fromAI('currency', 'ISO currency code, e.g. INR, USD', 'string', 'INR') }}" },
+            { "name": "sort_by", "value": "={{ $fromAI('sort_by', '3 = lowest price, 8 = highest rating, 13 = most reviewed', 'number', 8) }}" },
+            { "name": "hl", "value": "en" }
+          ]
+        },
+        "optimizeResponse": true,
+        "dataField": "properties",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Master": { "main": [[{ "node": "Travel Agent", "type": "main", "index": 0 }]] },
+    "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "Travel Agent", "type": "ai_languageModel", "index": 0 }]] },
+    "Search Flights": { "ai_tool": [[{ "node": "Travel Agent", "type": "ai_tool", "index": 0 }]] },
+    "Search Hotels": { "ai_tool": [[{ "node": "Travel Agent", "type": "ai_tool", "index": 0 }]] }
+  }
+}

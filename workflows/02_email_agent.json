@@ -1,0 +1,99 @@
+{
+  "id": "SwarmEmail000001",
+  "name": "SwarmAI - Email Agent",
+  "active": false,
+  "settings": { "executionOrder": "v1", "callerPolicy": "workflowsFromSameOwner" },
+  "nodes": [
+    {
+      "id": "e0000001-0000-4000-8000-000000000001",
+      "name": "When Called by Master",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "parameters": {
+        "workflowInputs": { "values": [{ "name": "query" }, { "name": "sessionId" }] }
+      }
+    },
+    {
+      "id": "e0000001-0000-4000-8000-000000000002",
+      "name": "Email Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [260, 0],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "options": {
+          "systemMessage": "=You are the EMAIL AGENT of a personal assistant. Current time: {{ $now.toISO() }}.\n\nYou can:\n- read/search emails (Gmail search syntax, e.g. 'is:unread', 'from:alice newer_than:2d')\n- send new emails\n- reply to an existing email (needs its message ID, so search first)\n\nRules:\n- When summarising emails, give sender, subject, date and a one-line gist for each.\n- Only send or reply when the request clearly asks you to. Write clear, polite, concise emails and sign off as the user's assistant only if no name is given.\n- If a recipient address is missing, do NOT guess it; say what information is missing.\n- Always report exactly what you did (e.g. 'Sent email to x@y.com with subject ...')."
+        }
+      }
+    },
+    {
+      "id": "e0000001-0000-4000-8000-000000000003",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [120, 240],
+      "parameters": {
+        "model": { "__rl": true, "mode": "list", "value": "gpt-4o-mini" },
+        "options": { "temperature": 0.2 }
+      }
+    },
+    {
+      "id": "e0000001-0000-4000-8000-000000000004",
+      "name": "Search Emails",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [300, 240],
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Search / list emails in the user's Gmail inbox. Returns id, threadId, from, subject, snippet, date.",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": "={{ $fromAI('limit', 'Max number of emails to return (1-20)', 'number', 10) }}",
+        "filters": {
+          "q": "={{ $fromAI('search_query', 'Gmail search query, e.g. is:unread newer_than:1d. Empty string for latest emails', 'string') }}"
+        }
+      }
+    },
+    {
+      "id": "e0000001-0000-4000-8000-000000000005",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [480, 240],
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Send a new email from the user's Gmail account.",
+        "sendTo": "={{ $fromAI('to', 'Recipient email address(es), comma separated', 'string') }}",
+        "subject": "={{ $fromAI('subject', 'Email subject', 'string') }}",
+        "emailType": "text",
+        "message": "={{ $fromAI('body', 'Plain-text email body', 'string') }}",
+        "options": { "appendAttribution": false }
+      }
+    },
+    {
+      "id": "e0000001-0000-4000-8000-000000000006",
+      "name": "Reply to Email",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [660, 240],
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Reply to an existing email in its thread. Requires the message ID (get it with Search Emails).",
+        "operation": "reply",
+        "messageId": "={{ $fromAI('message_id', 'ID of the email to reply to', 'string') }}",
+        "emailType": "text",
+        "message": "={{ $fromAI('body', 'Plain-text reply body', 'string') }}",
+        "options": { "appendAttribution": false }
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Master": { "main": [[{ "node": "Email Agent", "type": "main", "index": 0 }]] },
+    "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "Email Agent", "type": "ai_languageModel", "index": 0 }]] },
+    "Search Emails": { "ai_tool": [[{ "node": "Email Agent", "type": "ai_tool", "index": 0 }]] },
+    "Send Email": { "ai_tool": [[{ "node": "Email Agent", "type": "ai_tool", "index": 0 }]] },
+    "Reply to Email": { "ai_tool": [[{ "node": "Email Agent", "type": "ai_tool", "index": 0 }]] }
+  }
+}

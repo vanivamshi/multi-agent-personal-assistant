@@ -1,0 +1,296 @@
+{
+  "id": "SwarmMaster00001",
+  "name": "SwarmAI - Master Agent (Orchestrator)",
+  "active": false,
+  "settings": { "executionOrder": "v1", "callerPolicy": "workflowsFromSameOwner" },
+  "nodes": [
+    {
+      "id": "a0000001-0000-4000-8000-000000000001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "webhookId": "5b0f6d8e-6a4e-4c1b-9d1e-2f6a1c7e0a01",
+      "parameters": { "updates": ["message"], "additionalFields": {} }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000002",
+      "name": "Is Voice Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "6a1f3c2e-1d4b-4b7a-9c55-0e8e7f1a2b01",
+              "leftValue": "={{ $json.message.voice }}",
+              "rightValue": "",
+              "operator": { "type": "object", "operation": "exists", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000003",
+      "name": "Download Voice",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [440, -100],
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.voice.file_id }}",
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000004",
+      "name": "Transcribe Voice",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [660, -100],
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000005",
+      "name": "Webhook (Web / Voice / Mobile)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "9c2d7b1a-3e4f-4a5b-8c6d-7e8f9a0b1c02",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "assistant",
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000006",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 100],
+      "parameters": {
+        "jsCode": "// Every channel is converted to the same shape: { text, sessionId, channel, chatId }\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  if (j.headers && j.body !== undefined) {\n    // Web UI / mobile / voice webhook\n    const body = j.body || {};\n    out.push({ json: {\n      text: String(body.message || '').trim(),\n      sessionId: 'web-' + (body.sessionId || 'default'),\n      channel: 'web',\n      chatId: null,\n    }});\n  } else {\n    // Telegram (text message, or transcription result of a voice note)\n    const msg = $('Telegram Trigger').first().json.message;\n    const text = j.text ?? msg.text ?? msg.caption ?? '';\n    out.push({ json: {\n      text: String(text).trim() || '(the user sent a message type I cannot read yet)',\n      sessionId: 'tg-' + msg.chat.id,\n      channel: 'telegram',\n      chatId: msg.chat.id,\n    }});\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000007",
+      "name": "Master Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1100, 100],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "=You are SwarmAI, the MASTER AGENT (orchestrator) of a multi-agent personal assistant.\nCurrent time: {{ $now.toISO() }} (timezone {{ $now.zoneName }}). Channel: {{ $json.channel }}.\n\nYou do not do the work yourself. You route tasks to specialist agents (tools) and combine their answers:\n- email_agent: read, search, summarise, send and reply to emails (Gmail).\n- calendar_agent: view, create, reschedule and delete calendar events.\n- research_agent: web search + Wikipedia; facts, news, explanations, comparisons.\n- travel_agent: real flight and hotel search and price comparison.\n\nHow to work:\n1. Work out what the user wants. Use the conversation memory to resolve 'him', 'that meeting', 'the cheaper one', etc.\n2. Call one or more agents. Give each a complete, self-contained instruction with every detail it needs (names, email addresses, absolute dates and times, cities); it cannot see this conversation.\n3. For multi-step requests, chain agents. Example: 'find flights to Goa next Friday and block my calendar' -> travel_agent, then calendar_agent with the chosen flight times.\n4. If key information is missing for a write action (sending email, creating/deleting events), ask the user a short question instead of guessing.\n5. Small talk or simple general questions: answer directly without tools.\n\nReply style: friendly, concise, plain text (no markdown tables). Use short bullet lists when listing things. Confirm clearly what was done."
+        }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000008",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [900, 360],
+      "parameters": {
+        "model": { "__rl": true, "mode": "list", "value": "gpt-4o" },
+        "options": { "temperature": 0.3 }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000009",
+      "name": "Conversation Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [1060, 360],
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Normalize Input').item.json.sessionId }}",
+        "contextWindowLength": 12
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000010",
+      "name": "email_agent",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [1200, 360],
+      "parameters": {
+        "description": "Email specialist. Use for anything about the user's email: read/search/summarise inbox, send a new email, reply to an email. Pass a complete instruction in 'query'.",
+        "workflowId": { "__rl": true, "mode": "id", "value": "SwarmEmail000001" },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', 'Complete, self-contained instruction for the email agent', 'string') }}",
+            "sessionId": "={{ $('Normalize Input').item.json.sessionId }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "query", "displayName": "query", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "sessionId", "displayName": "sessionId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000011",
+      "name": "calendar_agent",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [1340, 360],
+      "parameters": {
+        "description": "Calendar specialist. Use to list events, check availability, create, reschedule or delete events. Pass a complete instruction with absolute dates/times in 'query'.",
+        "workflowId": { "__rl": true, "mode": "id", "value": "SwarmCalendar001" },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', 'Complete, self-contained instruction for the calendar agent', 'string') }}",
+            "sessionId": "={{ $('Normalize Input').item.json.sessionId }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "query", "displayName": "query", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "sessionId", "displayName": "sessionId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000012",
+      "name": "research_agent",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [1480, 360],
+      "parameters": {
+        "description": "Research specialist. Use for questions needing current or factual information from the web: news, facts, explanations, comparisons. Pass the research question in 'query'.",
+        "workflowId": { "__rl": true, "mode": "id", "value": "SwarmResearch001" },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', 'The research question, with all needed context', 'string') }}",
+            "sessionId": "={{ $('Normalize Input').item.json.sessionId }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "query", "displayName": "query", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "sessionId", "displayName": "sessionId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000013",
+      "name": "travel_agent",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [1620, 360],
+      "parameters": {
+        "description": "Travel specialist. Use to search and compare flights and hotels. Pass origin, destination, absolute dates (YYYY-MM-DD), travellers and budget/currency in 'query'.",
+        "workflowId": { "__rl": true, "mode": "id", "value": "SwarmTravel00001" },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', 'Complete travel search request with places and absolute dates', 'string') }}",
+            "sessionId": "={{ $('Normalize Input').item.json.sessionId }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "query", "displayName": "query", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "sessionId", "displayName": "sessionId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000014",
+      "name": "From Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1460, 100],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "6a1f3c2e-1d4b-4b7a-9c55-0e8e7f1a2b02",
+              "leftValue": "={{ $('Normalize Input').item.json.channel }}",
+              "rightValue": "telegram",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000015",
+      "name": "Reply on Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1680, 0],
+      "parameters": {
+        "chatId": "={{ $('Normalize Input').item.json.chatId }}",
+        "text": "={{ $('Master Agent').item.json.output }}",
+        "additionalFields": { "appendAttribution": false }
+      }
+    },
+    {
+      "id": "a0000001-0000-4000-8000-000000000016",
+      "name": "Reply to Web",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1680, 200],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { reply: $('Master Agent').item.json.output, sessionId: $('Normalize Input').item.json.sessionId } }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": { "main": [[{ "node": "Is Voice Message?", "type": "main", "index": 0 }]] },
+    "Is Voice Message?": {
+      "main": [
+        [{ "node": "Download Voice", "type": "main", "index": 0 }],
+        [{ "node": "Normalize Input", "type": "main", "index": 0 }]
+      ]
+    },
+    "Download Voice": { "main": [[{ "node": "Transcribe Voice", "type": "main", "index": 0 }]] },
+    "Transcribe Voice": { "main": [[{ "node": "Normalize Input", "type": "main", "index": 0 }]] },
+    "Webhook (Web / Voice / Mobile)": { "main": [[{ "node": "Normalize Input", "type": "main", "index": 0 }]] },
+    "Normalize Input": { "main": [[{ "node": "Master Agent", "type": "main", "index": 0 }]] },
+    "Master Agent": { "main": [[{ "node": "From Telegram?", "type": "main", "index": 0 }]] },
+    "From Telegram?": {
+      "main": [
+        [{ "node": "Reply on Telegram", "type": "main", "index": 0 }],
+        [{ "node": "Reply to Web", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "Master Agent", "type": "ai_languageModel", "index": 0 }]] },
+    "Conversation Memory": { "ai_memory": [[{ "node": "Master Agent", "type": "ai_memory", "index": 0 }]] },
+    "email_agent": { "ai_tool": [[{ "node": "Master Agent", "type": "ai_tool", "index": 0 }]] },
+    "calendar_agent": { "ai_tool": [[{ "node": "Master Agent", "type": "ai_tool", "index": 0 }]] },
+    "research_agent": { "ai_tool": [[{ "node": "Master Agent", "type": "ai_tool", "index": 0 }]] },
+    "travel_agent": { "ai_tool": [[{ "node": "Master Agent", "type": "ai_tool", "index": 0 }]] }
+  }
+}
